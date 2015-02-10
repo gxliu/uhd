@@ -135,30 +135,39 @@ void ad9361_device_t::_program_fir_filter(direction_t direction, int num_taps, b
     _io_iface->poke8(base + 5, reg_numtaps | 0x1A);
     if (direction == RX) {
         _io_iface->poke8(base + 5, reg_numtaps | 0x18);
+        /* Rx Gain, set to prevent digital overflow/saturation in filters
+           0:+6dB, 1:0dB, 2:-6dB, 3:-12dB
+           page 35 of UG-671 */
         _io_iface->poke8(base + 6, 0x02); /* Also turn on -6dB Rx gain here, to stop filter overfow.*/
     } else {
-        _io_iface->poke8(base + 5, reg_numtaps | 0x19); /* Also turn on -6dB Tx gain here, to stop filter overfow.*/
+        /* Tx Gain. bit[0]. set to prevent digital overflow/saturation in filters
+           0: 0dB, 1:-6dB
+           page 25 of UG-671 */
+        _io_iface->poke8(base + 5, reg_numtaps | 0x18);
     }
 }
 
 
 /* Program the RX FIR Filter. */
-void ad9361_device_t::_setup_rx_fir(size_t num_taps)
+void ad9361_device_t::_setup_rx_fir(size_t num_taps, boost::int32_t decimation)
 {
+    if (not (decimation == 1 or decimation == 2 or decimation == 4)) {
+        throw uhd::runtime_error("[ad9361_device_t] Invalid Rx FIR decimation.");
+    }
     boost::scoped_array<boost::uint16_t> coeffs(new boost::uint16_t[num_taps]);
     for (size_t i = 0; i < num_taps; i++) {
         switch (num_taps) {
         case 128:
-            coeffs[i] = boost::uint16_t(hb127_coeffs[i]);
+            coeffs[i] = boost::uint16_t((decimation==4) ? fir_128_x4_coeffs[i] : hb127_coeffs[i]);
             break;
         case 96:
-            coeffs[i] = boost::uint16_t(hb95_coeffs[i]);
+            coeffs[i] = boost::uint16_t((decimation==4) ? fir_96_x4_coeffs[i] : hb95_coeffs[i]);
             break;
         case 64:
-            coeffs[i] = boost::uint16_t(hb63_coeffs[i]);
+            coeffs[i] = boost::uint16_t((decimation==4) ? fir_64_x4_coeffs[i] : hb63_coeffs[i]);
             break;
         case 48:
-            coeffs[i] = boost::uint16_t(hb47_coeffs[i]);
+            coeffs[i] = boost::uint16_t((decimation==4) ? fir_48_x4_coeffs[i] : hb47_coeffs[i]);
             break;
         default:
             throw uhd::runtime_error("[ad9361_device_t] Unsupported number of Rx FIR taps.");
@@ -169,22 +178,28 @@ void ad9361_device_t::_setup_rx_fir(size_t num_taps)
 }
 
 /* Program the TX FIR Filter. */
-void ad9361_device_t::_setup_tx_fir(size_t num_taps)
+void ad9361_device_t::_setup_tx_fir(size_t num_taps, boost::int32_t interpolation)
 {
+    if (not (interpolation == 1 or interpolation == 2 or interpolation == 4)) {
+        throw uhd::runtime_error("[ad9361_device_t] Invalid Tx FIR interpolation.");
+    }
+    if (interpolation == 1 and num_taps > 64) {
+        throw uhd::runtime_error("[ad9361_device_t] Too many Tx FIR taps for interpolation value.");
+    }
     boost::scoped_array<boost::uint16_t> coeffs(new boost::uint16_t[num_taps]);
     for (size_t i = 0; i < num_taps; i++) {
         switch (num_taps) {
         case 128:
-            coeffs[i] = boost::uint16_t(hb127_coeffs[i]);
+            coeffs[i] = boost::uint16_t((interpolation==4) ? fir_128_x4_coeffs[i] : hb127_coeffs[i]);
             break;
         case 96:
-            coeffs[i] = boost::uint16_t(hb95_coeffs[i]);
+            coeffs[i] = boost::uint16_t((interpolation==4) ? fir_96_x4_coeffs[i] : hb95_coeffs[i]);
             break;
         case 64:
-            coeffs[i] = boost::uint16_t(hb63_coeffs[i]);
+            coeffs[i] = boost::uint16_t((interpolation==4) ? fir_64_x4_coeffs[i] : hb63_coeffs[i]);
             break;
         case 48:
-            coeffs[i] = boost::uint16_t(hb47_coeffs[i]);
+            coeffs[i] = boost::uint16_t((interpolation==4) ? fir_48_x4_coeffs[i] : hb47_coeffs[i]);
             break;
         default:
             throw uhd::runtime_error("[ad9361_device_t] Unsupported number of Tx FIR taps.");
@@ -1231,6 +1246,7 @@ double ad9361_device_t::_setup_rates(const double rate)
     /* If we make it into this function, then we are tuning to a new rate.
      * Store the new rate. */
     _req_clock_rate = rate;
+    UHD_LOG << boost::format("[ad9361_device_t::_setup_rates] rate=%d\n") % rate;
 
     /* Set the decimation and interpolation values in the RX and TX chains.
      * This also switches filters in / out. Note that all transmitters and
@@ -1239,6 +1255,7 @@ double ad9361_device_t::_setup_rates(const double rate)
      * user-requested antenna selections. */
     int divfactor = 0;
     _tfir_factor = 0;
+    _rfir_factor = 0;
     if (rate < 0.33e6) {
         // RX1 + RX2 enabled, 3, 2, 2, 4
         _regs.rxfilt = B8(11101111);
@@ -1247,7 +1264,8 @@ double ad9361_device_t::_setup_rates(const double rate)
         _regs.txfilt = B8(11101111);
 
         divfactor = 48;
-        _tfir_factor = 2;
+        _tfir_factor = 4;
+        _rfir_factor = 4;
     } else if (rate < 0.66e6) {
         // RX1 + RX2 enabled, 2, 2, 2, 4
         _regs.rxfilt = B8(11011111);
@@ -1256,7 +1274,8 @@ double ad9361_device_t::_setup_rates(const double rate)
         _regs.txfilt = B8(11011111);
 
         divfactor = 32;
-        _tfir_factor = 2;
+        _tfir_factor = 4;
+        _rfir_factor = 4;
     } else if (rate <= 20e6) {
         // RX1 + RX2 enabled, 2, 2, 2, 2
         _regs.rxfilt = B8(11011110);
@@ -1266,6 +1285,7 @@ double ad9361_device_t::_setup_rates(const double rate)
 
         divfactor = 16;
         _tfir_factor = 2;
+        _rfir_factor = 2;
     } else if ((rate > 20e6) && (rate < 23e6)) {
         // RX1 + RX2 enabled, 3, 2, 2, 2
         _regs.rxfilt = B8(11101110);
@@ -1275,6 +1295,7 @@ double ad9361_device_t::_setup_rates(const double rate)
 
         divfactor = 24;
         _tfir_factor = 2;
+        _rfir_factor = 2;
     } else if ((rate >= 23e6) && (rate < 41e6)) {
         // RX1 + RX2 enabled, 2, 2, 2, 2
         _regs.rxfilt = B8(11011110);
@@ -1284,6 +1305,7 @@ double ad9361_device_t::_setup_rates(const double rate)
 
         divfactor = 16;
         _tfir_factor = 2;
+        _rfir_factor = 2;
     } else if ((rate >= 41e6) && (rate <= 56e6)) {
         // RX1 + RX2 enabled, 3, 1, 2, 2
         _regs.rxfilt = B8(11100110);
@@ -1293,6 +1315,7 @@ double ad9361_device_t::_setup_rates(const double rate)
 
         divfactor = 12;
         _tfir_factor = 2;
+        _rfir_factor = 2;
     } else if ((rate > 56e6) && (rate <= 61.44e6)) {
         // RX1 + RX2 enabled, 3, 1, 1, 2
         _regs.rxfilt = B8(11100010);
@@ -1302,6 +1325,7 @@ double ad9361_device_t::_setup_rates(const double rate)
 
         divfactor = 6;
         _tfir_factor = 1;
+        _rfir_factor = 2;
     } else {
         // should never get in here
         throw uhd::runtime_error("[ad9361_device_t] [_setup_rates] INVALID_CODE_PATH");
@@ -1349,8 +1373,8 @@ double ad9361_device_t::_setup_rates(const double rate)
     const size_t num_tx_taps = get_num_taps(max_tx_taps);
     const size_t num_rx_taps = get_num_taps(max_rx_taps);
 
-    _setup_tx_fir(num_tx_taps);
-    _setup_rx_fir(num_rx_taps);
+    _setup_tx_fir(num_tx_taps,_tfir_factor);
+    _setup_rx_fir(num_rx_taps,_rfir_factor);
 
     return _baseband_bw;
 }
@@ -1476,7 +1500,7 @@ void ad9361_device_t::initialize()
     /* Setup AuxADC */
     _io_iface->poke8(0x00B, 0x00); // Temp Sensor Setup (Offset)
     _io_iface->poke8(0x00C, 0x00); // Temp Sensor Setup (Temp Window)
-    _io_iface->poke8(0x00D, 0x03); // Temp Sensor Setup (Periodic Measure)
+    _io_iface->poke8(0x00D, 0x00); // Temp Sensor Setup (Manual  Measure)
     _io_iface->poke8(0x00F, 0x04); // Temp Sensor Setup (Decimation)
     _io_iface->poke8(0x01C, 0x10); // AuxADC Setup (Clock Div)
     _io_iface->poke8(0x01D, 0x01); // AuxADC Setup (Decimation/Enable)
@@ -1604,7 +1628,7 @@ double ad9361_device_t::set_clock_rate(const double req_rate)
      * starts up. This prevents that, and any bugs in user code that request
      * the same rate over and over. */
     if (freq_is_nearly_equal(req_rate, _req_clock_rate)) {
-        return _baseband_bw;
+        return _baseband_bw; // IJB. Should this not return req_rate?
     }
 
     /* We must be in the SLEEP / WAIT state to do this. If we aren't already
@@ -1863,10 +1887,10 @@ double ad9361_device_t::set_gain(direction_t direction, chain_t chain, const dou
             gain_index = 0;
 
         if (chain == CHAIN_1) {
-            _rx1_gain = boost::uint32_t(value);
+            _rx1_gain = value;
             _io_iface->poke8(0x109, gain_index);
         } else {
-            _rx2_gain = boost::uint32_t(value);
+            _rx2_gain = value;
             _io_iface->poke8(0x10c, gain_index);
         }
 
@@ -1879,15 +1903,19 @@ double ad9361_device_t::set_gain(direction_t direction, chain_t chain, const dou
 
         /* Each gain step is -0.25dB. Calculate the attenuation necessary
          * for the requested gain, convert it into gain steps, then write
-         * the attenuation word. Max gain (so zero attenuation) is 89.75. */
+         * the attenuation word. Max gain (so zero attenuation) is 89.75.
+         * Ugly values will be written to the attenuation registers if
+         * "value" is out of bounds, so range checking must be performed
+         * outside this function.
+         */
         double atten = AD9361_MAX_GAIN - value;
         boost::uint32_t attenreg = boost::uint32_t(atten * 4);
         if (chain == CHAIN_1) {
-            _tx1_gain = boost::uint32_t(value);
+            _tx1_gain = value;
             _io_iface->poke8(0x073, attenreg & 0xFF);
             _io_iface->poke8(0x074, (attenreg >> 8) & 0x01);
         } else {
-            _tx2_gain = boost::uint32_t(value);
+            _tx2_gain = value;
             _io_iface->poke8(0x075, attenreg & 0xFF);
             _io_iface->poke8(0x076, (attenreg >> 8) & 0x01);
         }
@@ -1909,6 +1937,72 @@ void ad9361_device_t::data_port_loopback(const bool loopback_enabled)
 {
     boost::lock_guard<boost::recursive_mutex> lock(_mutex);
     _io_iface->poke8(0x3F5, (loopback_enabled ? 0x01 : 0x00));
+}
+
+/* Read back the internal RSSI measurement data. The result is in dB
+ * but not in absolute units. If absolute units are required
+ * a bench calibration should be done.
+ * -0.25dB / bit 9bit resolution.*/
+double ad9361_device_t::get_rssi(chain_t chain)
+{
+    boost::uint32_t reg_rssi = 0;
+    boost::uint8_t lsb_bit_pos = 0;
+    if (chain == CHAIN_1) {
+        reg_rssi = 0x1A7;
+        lsb_bit_pos = 0;
+    }else {
+        reg_rssi = 0x1A9;
+        lsb_bit_pos = 1;
+    }
+    boost::uint8_t msbs = _io_iface->peek8(reg_rssi);
+    boost::uint8_t lsb = ((_io_iface->peek8(0x1AB)) >> lsb_bit_pos) & 0x01;
+    boost::uint16_t val = ((msbs << 1) | lsb);
+    double rssi = (-0.25f * ((double)val)); //-0.25dB/lsb (See Gain Control Users Guide p. 25)
+    return rssi;
+}
+
+/*
+ * Returns the reading of the internal temperature sensor.
+ * One point calibration of the sensor was done according to datasheet
+ * leading to the given default constant correction factor.
+ */
+double ad9361_device_t::_get_temperature(const double cal_offset, const double timeout)
+{
+    //set 0x01D[0] to 1 to disable AuxADC GPIO reading
+    boost::uint8_t tmp = 0;
+    tmp = _io_iface->peek8(0x01D);
+    _io_iface->poke8(0x01D, (tmp | 0x01));
+    _io_iface->poke8(0x00B, 0); //set offset to 0
+
+    _io_iface->poke8(0x00C, 0x01); //start reading, clears bit 0x00C[1]
+    boost::posix_time::ptime start_time = boost::posix_time::microsec_clock::local_time();
+    boost::posix_time::time_duration elapsed;
+    //wait for valid data (toggle of bit 1 in 0x00C)
+    while(((_io_iface->peek8(0x00C) >> 1) & 0x01) == 0) {
+        boost::this_thread::sleep(boost::posix_time::microseconds(100));
+        elapsed = boost::posix_time::microsec_clock::local_time() - start_time;
+        if(elapsed.total_milliseconds() > (timeout*1000))
+        {
+            throw uhd::runtime_error("[ad9361_device_t] timeout while reading temperature");
+        }
+    }
+    _io_iface->poke8(0x00C, 0x00); //clear read flag
+
+    boost::uint8_t temp = _io_iface->peek8(0x00E); //read temperature.
+    double tmp_temp = temp/1.140f; //according to ADI driver
+    tmp_temp = tmp_temp + cal_offset; //Constant offset acquired by one point calibration.
+
+    return tmp_temp;
+}
+
+double ad9361_device_t::get_average_temperature(const double cal_offset, const size_t num_samples)
+{
+    double d_temp = 0;
+    for(size_t i = 0; i < num_samples; i++) {
+        double tmp_temp = _get_temperature(cal_offset);
+        d_temp += (tmp_temp/num_samples);
+    }
+    return d_temp;
 }
 
 }}

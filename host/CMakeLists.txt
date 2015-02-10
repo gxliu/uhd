@@ -60,9 +60,38 @@ SET(PKG_DOC_DIR share/doc/uhd)
 SET(PKG_MAN_DIR share/man/man1)
 
 ########################################################################
+# UHD Image Directories
+########################################################################
+IF(NOT DEFINED UHD_IMAGES_DIR)
+    IF(DEFINED FPGA_IMAGES_DIR)
+        SET(UHD_IMAGES_DIR ${FPGA_IMAGES_DIR})
+    ELSE(DEFINED FPGA_IMAGES_DIR)
+        FILE(TO_NATIVE_PATH ${CMAKE_INSTALL_PREFIX}/share/uhd/images using_images_dir)
+        SET(UHD_IMAGES_DIR ${using_images_dir})
+    ENDIF(DEFINED FPGA_IMAGES_DIR)
+ENDIF(NOT DEFINED UHD_IMAGES_DIR)
+
+OPTION(UHD_IMAGES_DIR "Path to installed UHD image binaries.")
+MESSAGE( STATUS "Using UHD Images Directory: ${UHD_IMAGES_DIR}" )
+ADD_DEFINITIONS(-DUHD_IMAGES_DIR=${UHD_IMAGES_DIR})
+
+IF(DEFINED USE_NIUSRP_WINREG_KEY)
+    ADD_DEFINITIONS(-DUSE_NIUSRP_WINREG_KEY)
+ENDIF(DEFINED USE_NIUSRP_WINREG_KEY)
+
+########################################################################
 # Local Include Dir
 ########################################################################
+INCLUDE_DIRECTORIES(${CMAKE_BINARY_DIR}/include)
 INCLUDE_DIRECTORIES(${CMAKE_SOURCE_DIR}/include)
+
+########################################################################
+# Static Lib Configuration
+########################################################################
+OPTION(ENABLE_STATIC_LIBS "Enable building of static libraries" OFF)
+IF(ENABLE_STATIC_LIBS)
+    MESSAGE(STATUS "Building Static Libraries: ${ENABLE_STATIC_LIBS}")
+ENDIF(ENABLE_STATIC_LIBS)
 
 ########################################################################
 # On Apple only, set install name and use rpath correctly, if not already set
@@ -137,6 +166,22 @@ IF(MSVC)
     ADD_DEFINITIONS(/MP) #multi-threaded build
 ENDIF(MSVC)
 
+IF(MINGW)
+    #Avoid depending on MinGW runtime DLLs
+    CHECK_CXX_COMPILER_FLAG(-static-libgcc HAVE_STATIC_LIBGCC_FLAG)
+    IF(HAVE_STATIC_LIBGCC_FLAG)
+        SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc")
+        SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libgcc")
+        SET(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -static-libgcc")
+    ENDIF()
+    CHECK_CXX_COMPILER_FLAG(-static-libstdc++ HAVE_STATIC_LIBSTDCXX_FLAG)
+    IF(HAVE_STATIC_LIBSTDCXX_FLAG)
+        SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
+        SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
+        SET(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -static-libstdc++")
+    ENDIF()
+ENDIF()
+
 IF(CYGWIN)
     ADD_DEFINITIONS(-D__USE_W32_SOCKETS) #boost asio says we need this
 ENDIF(CYGWIN)
@@ -190,6 +235,11 @@ MESSAGE(STATUS "Boost library directories: ${Boost_LIBRARY_DIRS}")
 MESSAGE(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 
 ########################################################################
+# Additional settings for build environment
+########################################################################
+INCLUDE(UHDGlobalDefs)
+
+########################################################################
 # Check Python Modules
 ########################################################################
 INCLUDE(UHDPython)
@@ -234,8 +284,8 @@ UHD_INSTALL(FILES
 #{{{IMG_SECTION
 # This section is written automatically by /images/create_imgs_package.py
 # Any manual changes in here will be overwritten.
-SET(UHD_IMAGES_MD5SUM "afd3164df1f251b921e22b4244272579")
-SET(UHD_IMAGES_DOWNLOAD_SRC "uhd-images_003.008.000-release.zip")
+SET(UHD_IMAGES_MD5SUM "164e052f2192f3652b03ee5976c9f53b")
+SET(UHD_IMAGES_DOWNLOAD_SRC "uhd-images_003.008.002-release.zip")
 #}}}
 
 ########################################################################
@@ -309,14 +359,35 @@ IF(NOT CMAKE_MODULES_DIR)
    SET(CMAKE_MODULES_DIR lib${LIB_SUFFIX}/cmake)
 ENDIF(NOT CMAKE_MODULES_DIR)
 
+# UHDConfig.cmake needs UHD_LINK_LIST_STATIC set:
+LIST(APPEND UHD_LINK_LIST_STATIC "dl")
+LIST(APPEND UHD_LINK_LIST_STATIC "pthread")
+FOREACH(Boost_Comp ${BOOST_REQUIRED_COMPONENTS})
+    IF(NOT ${Boost_Comp} STREQUAL "unit_test_framework")
+        LIST(APPEND UHD_LINK_LIST_STATIC "boost_${Boost_Comp}")
+    ENDIF(NOT ${Boost_Comp} STREQUAL "unit_test_framework")
+ENDFOREACH(Boost_Comp)
+IF(ENABLE_USB)
+    LIST(APPEND UHD_LINK_LIST_STATIC "usb-1.0")
+ENDIF(ENABLE_USB)
+IF(ENABLE_ORC)
+    LIST(APPEND UHD_LINK_LIST_STATIC "orc-0.4")
+ENDIF(ENABLE_ORC)
+message(STATUS "libs: ${UHD_LINK_LIST_STATIC}")
+
 CONFIGURE_FILE(
     ${CMAKE_SOURCE_DIR}/cmake/Modules/UHDConfigVersion.cmake.in
     ${CMAKE_BINARY_DIR}/cmake/Modules/UHDConfigVersion.cmake
     @ONLY
 )
+CONFIGURE_FILE(
+    ${CMAKE_SOURCE_DIR}/cmake/Modules/UHDConfig.cmake.in
+    ${CMAKE_BINARY_DIR}/cmake/Modules/UHDConfig.cmake
+    @ONLY
+)
 
 SET(cmake_configs
-    ${CMAKE_SOURCE_DIR}/cmake/Modules/UHDConfig.cmake
+    ${CMAKE_BINARY_DIR}/cmake/Modules/UHDConfig.cmake
     ${CMAKE_BINARY_DIR}/cmake/Modules/UHDConfigVersion.cmake
 )
 
@@ -327,7 +398,7 @@ UHD_INSTALL(
 )
 
 ########################################################################
-# Handle pre-built images
+# Handle pre-built UHD Images meant for installation
 ########################################################################
 IF(DEFINED UHD_IMAGES_DIR AND EXISTS "${UHD_IMAGES_DIR}")
     FILE(GLOB_RECURSE _image_files "${UHD_IMAGES_DIR}/*")

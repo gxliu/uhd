@@ -1,5 +1,5 @@
 //
-// Copyright 2010-2011 Ettus Research LLC
+// Copyright 2010-2011,2014 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -56,6 +56,13 @@ typedef ptrdiff_t ssize_t;
     #define UHD_DEPRECATED     __declspec(deprecated)
     #define UHD_ALIGNED(x)     __declspec(align(x))
     #define UHD_UNUSED(x)      x
+#elif defined(__MINGW32__)
+    #define UHD_EXPORT         __declspec(dllexport)
+    #define UHD_IMPORT         __declspec(dllimport)
+    #define UHD_INLINE         inline
+    #define UHD_DEPRECATED     __declspec(deprecated)
+    #define UHD_ALIGNED(x)     __declspec(align(x))
+    #define UHD_UNUSED(x)      x
 #elif defined(__GNUG__) && __GNUG__ >= 4
     #define UHD_EXPORT         __attribute__((visibility("default")))
     #define UHD_IMPORT         __attribute__((visibility("default")))
@@ -91,5 +98,17 @@ typedef ptrdiff_t ssize_t;
 #elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
     #define UHD_PLATFORM_BSD
 #endif
+
+// Define 'stringize' preprocessor macros. The stringize macro, XSTR, takes
+// variable arguments so that it can deal with strings that contain commas.
+// There are two different versions because MSVC handles this syntax a bit
+// differently than other compilers.
+#if defined(BOOST_MSVC)
+    #define XSTR(x,...) #x
+#else
+    #define XSTR(x...) #x
+#endif
+
+#define STR(x) XSTR(x)
 
 #endif /* INCLUDED_UHD_CONFIG_HPP */

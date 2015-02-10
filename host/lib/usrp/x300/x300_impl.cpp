@@ -41,7 +41,7 @@
 
 #define NIUSRPRIO_DEFAULT_RPC_PORT "5444"
 
-#define X300_REV(x) (x - "A" + 1)
+#define X300_REV(x) ((x) - "A" + 1)
 
 using namespace uhd;
 using namespace uhd::usrp;
@@ -755,6 +755,12 @@ void x300_impl::setup_mb(const size_t mb_i, const uhd::device_addr_t &dev_addr)
     _tree->create<bool>(mb_path / "clock_source" / "output")
         .subscribe(boost::bind(&x300_clock_ctrl::set_ref_out, mb.clock, _1));
 
+    //initialize tick rate (must be done before setting time)
+    _tree->access<double>(mb_path / "tick_rate")
+        .subscribe(boost::bind(&x300_impl::set_tick_rate, this, boost::ref(mb), _1))
+        .subscribe(boost::bind(&x300_impl::update_tick_rate, this, boost::ref(mb), _1))
+        .set(mb.clock->get_master_clock_rate());
+
     ////////////////////////////////////////////////////////////////////
     // initialize clock and time sources
     ////////////////////////////////////////////////////////////////////
@@ -788,14 +794,6 @@ void x300_impl::setup_mb(const size_t mb_i, const uhd::device_addr_t &dev_addr)
     ////////////////////////////////////////////////////////////////////
     _tree->create<sensor_value_t>(mb_path / "sensors" / "ref_locked")
         .publish(boost::bind(&x300_impl::get_ref_locked, this, mb.zpu_ctrl));
-
-    ////////////////////////////////////////////////////////////////////
-    // create clock properties
-    ////////////////////////////////////////////////////////////////////
-    _tree->access<double>(mb_path / "tick_rate")
-        .subscribe(boost::bind(&x300_impl::set_tick_rate, this, boost::ref(mb), _1))
-        .subscribe(boost::bind(&x300_impl::update_tick_rate, this, boost::ref(mb), _1))
-        .set(mb.clock->get_master_clock_rate());
 
     ////////////////////////////////////////////////////////////////////
     // do some post-init tasks
@@ -1434,8 +1432,8 @@ bool x300_impl::wait_for_ref_locked(wb_iface::sptr ctrl, double timeout)
         boost::this_thread::sleep(boost::posix_time::milliseconds(1));
     } while (boost::get_system_time() < timeout_time);
 
-    //failed to lock on reference
-    return false;
+    //Check one last time
+    return get_ref_locked(ctrl).to_bool();
 }
 
 sensor_value_t x300_impl::get_ref_locked(wb_iface::sptr ctrl)
@@ -1722,14 +1720,20 @@ x300_impl::x300_mboard_t x300_impl::get_mb_type_from_pcie(const std::string& res
                 case X300_USRP_PCIE_SSID:
                     mb_type = USRP_X300_MB; break;
                 case X310_USRP_PCIE_SSID:
-                case X310_2940R_PCIE_SSID:
-                case X310_2942R_PCIE_SSID:
-                case X310_2943R_PCIE_SSID:
-                case X310_2944R_PCIE_SSID:
-                case X310_2950R_PCIE_SSID:
-                case X310_2952R_PCIE_SSID:
-                case X310_2953R_PCIE_SSID:
-                case X310_2954R_PCIE_SSID:
+                case X310_2940R_40MHz_PCIE_SSID:
+                case X310_2940R_120MHz_PCIE_SSID:
+                case X310_2942R_40MHz_PCIE_SSID:
+                case X310_2942R_120MHz_PCIE_SSID:
+                case X310_2943R_40MHz_PCIE_SSID:
+                case X310_2943R_120MHz_PCIE_SSID:
+                case X310_2944R_40MHz_PCIE_SSID:
+                case X310_2950R_40MHz_PCIE_SSID:
+                case X310_2950R_120MHz_PCIE_SSID:
+                case X310_2952R_40MHz_PCIE_SSID:
+                case X310_2952R_120MHz_PCIE_SSID:
+                case X310_2953R_40MHz_PCIE_SSID:
+                case X310_2953R_120MHz_PCIE_SSID:
+                case X310_2954R_40MHz_PCIE_SSID:
                     mb_type = USRP_X310_MB; break;
                 default:
                     mb_type = UNKNOWN;      break;
@@ -1757,14 +1761,20 @@ x300_impl::x300_mboard_t x300_impl::get_mb_type_from_eeprom(const uhd::usrp::mbo
             case X300_USRP_PCIE_SSID:
                 mb_type = USRP_X300_MB; break;
             case X310_USRP_PCIE_SSID:
-            case X310_2940R_PCIE_SSID:
-            case X310_2942R_PCIE_SSID:
-            case X310_2943R_PCIE_SSID:
-            case X310_2944R_PCIE_SSID:
-            case X310_2950R_PCIE_SSID:
-            case X310_2952R_PCIE_SSID:
-            case X310_2953R_PCIE_SSID:
-            case X310_2954R_PCIE_SSID:
+            case X310_2940R_40MHz_PCIE_SSID:
+            case X310_2940R_120MHz_PCIE_SSID:
+            case X310_2942R_40MHz_PCIE_SSID:
+            case X310_2942R_120MHz_PCIE_SSID:
+            case X310_2943R_40MHz_PCIE_SSID:
+            case X310_2943R_120MHz_PCIE_SSID:
+            case X310_2944R_40MHz_PCIE_SSID:
+            case X310_2950R_40MHz_PCIE_SSID:
+            case X310_2950R_120MHz_PCIE_SSID:
+            case X310_2952R_40MHz_PCIE_SSID:
+            case X310_2952R_120MHz_PCIE_SSID:
+            case X310_2953R_40MHz_PCIE_SSID:
+            case X310_2953R_120MHz_PCIE_SSID:
+            case X310_2954R_40MHz_PCIE_SSID:
                 mb_type = USRP_X310_MB; break;
             default:
                 UHD_MSG(warning) << "X300 unknown product code in EEPROM: " << product_num << std::endl;

@@ -33,6 +33,8 @@ public:
             double          rate;
             double          gain;
             double          freq;
+            double          rssi;
+            double          temp;
             boost::uint64_t bits;
         };
 
@@ -42,6 +44,8 @@ public:
         static const boost::uint32_t ACTION_SET_ACTIVE_CHANS    = 12;
         static const boost::uint32_t ACTION_TUNE                = 13;
         static const boost::uint32_t ACTION_SET_LOOPBACK        = 14;
+        static const boost::uint32_t ACTION_GET_RSSI            = 15;
+        static const boost::uint32_t ACTION_GET_TEMPERATURE     = 16;
 
         //Values for "which"
         static const boost::uint32_t CHAIN_NONE = 0;

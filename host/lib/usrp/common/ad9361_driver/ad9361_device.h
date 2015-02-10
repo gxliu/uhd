@@ -63,6 +63,15 @@ public:
     /* Turn on/off AD9361's TX port --> RX port loopback. */
     void data_port_loopback(const bool loopback_enabled);
 
+    /* Read back the internal RSSI measurement data. */
+    double get_rssi(chain_t chain);
+
+    /*! Read the internal temperature sensor
+     *\param calibrate return raw sensor readings or apply calibration factor.
+     *\param num_samples number of measurements to average over
+     */
+    double get_average_temperature(const double cal_offset = -30.0, const size_t num_samples = 3);
+
     //Constants
     static const double AD9361_MAX_GAIN;
     static const double AD9361_MAX_CLOCK_RATE;
@@ -70,8 +79,8 @@ public:
 
 private:    //Methods
     void _program_fir_filter(direction_t direction, int num_taps, boost::uint16_t *coeffs);
-    void _setup_tx_fir(size_t num_taps);
-    void _setup_rx_fir(size_t num_taps);
+    void _setup_tx_fir(size_t num_taps, boost::int32_t interpolation);
+    void _setup_rx_fir(size_t num_taps, boost::int32_t decimation);
     void _calibrate_lock_bbpll();
     void _calibrate_synth_charge_pumps();
     double _calibrate_baseband_rx_analog_filter();
@@ -92,6 +101,7 @@ private:    //Methods
     void _reprogram_gains();
     double _tune_helper(direction_t direction, const double value);
     double _setup_rates(const double rate);
+    double _get_temperature(const double cal_offset, const double timeout = 0.1);
 
 private:    //Members
     typedef struct {
@@ -113,8 +123,9 @@ private:    //Members
     double              _req_clock_rate, _req_coreclk;
     boost::uint16_t     _rx_bbf_tunediv;
     boost::uint8_t      _curr_gain_table;
-    boost::uint32_t     _rx1_gain, _rx2_gain, _tx1_gain, _tx2_gain;
+    double              _rx1_gain, _rx2_gain, _tx1_gain, _tx2_gain;
     boost::int32_t      _tfir_factor;
+    boost::int32_t      _rfir_factor;
     //Register soft-copies
     chip_regs_t         _regs;
     //Synchronization

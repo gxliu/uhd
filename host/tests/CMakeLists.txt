@@ -27,8 +27,9 @@ SET(test_sources
     addr_test.cpp
     buffer_test.cpp
     byteswap_test.cpp
-    convert_test.cpp
     cast_test.cpp
+    chdr_test.cpp
+    convert_test.cpp
     dict_test.cpp
     error_test.cpp
     fp_compare_delta_test.cpp
@@ -47,7 +48,11 @@ SET(test_sources
 )
 
 #turn each test cpp file into an executable with an int main() function
-ADD_DEFINITIONS(-DBOOST_TEST_DYN_LINK -DBOOST_TEST_MAIN)
+IF(MINGW)
+    ADD_DEFINITIONS(-DBOOST_TEST_MAIN)
+ELSE()
+    ADD_DEFINITIONS(-DBOOST_TEST_DYN_LINK -DBOOST_TEST_MAIN)
+ENDIF()
 
 SET(UHD_TEST_TARGET_DEPS uhd)
 SET(UHD_TEST_LIBRARY_DIRS ${Boost_LIBRARY_DIRS})
@@ -56,7 +61,7 @@ SET(UHD_TEST_LIBRARY_DIRS ${Boost_LIBRARY_DIRS})
 FOREACH(test_source ${test_sources})
     GET_FILENAME_COMPONENT(test_name ${test_source} NAME_WE)
     ADD_EXECUTABLE(${test_name} ${test_source})
-    TARGET_LINK_LIBRARIES(${test_name} uhd)
+    TARGET_LINK_LIBRARIES(${test_name} uhd ${Boost_LIBRARIES})
     UHD_ADD_TEST(${test_name} ${test_name})
     UHD_INSTALL(TARGETS ${test_name} RUNTIME DESTINATION ${PKG_LIB_DIR}/tests COMPONENT tests)
 ENDFOREACH(test_source)

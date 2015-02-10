@@ -23,6 +23,7 @@
 #include <uhd/transport/nirio_zero_copy.hpp>
 #include "async_packet_handler.hpp"
 #include <uhd/transport/bounded_buffer.hpp>
+#include <uhd/transport/chdr.hpp>
 #include <boost/bind.hpp>
 #include <uhd/utils/tasks.hpp>
 #include <uhd/utils/log.hpp>
@@ -124,41 +125,6 @@ void x300_impl::update_subdev_spec(const std::string &tx_rx, const size_t mb_i, 
 
 
 /***********************************************************************
- * VITA stuff
- **********************************************************************/
-static void x300_if_hdr_unpack_be(
-    const boost::uint32_t *packet_buff,
-    vrt::if_packet_info_t &if_packet_info
-){
-    if_packet_info.link_type = vrt::if_packet_info_t::LINK_TYPE_CHDR;
-    return vrt::if_hdr_unpack_be(packet_buff, if_packet_info);
-}
-
-static void x300_if_hdr_pack_be(
-    boost::uint32_t *packet_buff,
-    vrt::if_packet_info_t &if_packet_info
-){
-    if_packet_info.link_type = vrt::if_packet_info_t::LINK_TYPE_CHDR;
-    return vrt::if_hdr_pack_be(packet_buff, if_packet_info);
-}
-
-static void x300_if_hdr_unpack_le(
-    const boost::uint32_t *packet_buff,
-    vrt::if_packet_info_t &if_packet_info
-){
-    if_packet_info.link_type = vrt::if_packet_info_t::LINK_TYPE_CHDR;
-    return vrt::if_hdr_unpack_le(packet_buff, if_packet_info);
-}
-
-static void x300_if_hdr_pack_le(
-    boost::uint32_t *packet_buff,
-    vrt::if_packet_info_t &if_packet_info
-){
-    if_packet_info.link_type = vrt::if_packet_info_t::LINK_TYPE_CHDR;
-    return vrt::if_hdr_pack_le(packet_buff, if_packet_info);
-}
-
-/***********************************************************************
  * RX flow control handler
  **********************************************************************/
 static size_t get_rx_flow_control_window(size_t frame_size, size_t sw_buff_size, const device_addr_t& rx_args)
@@ -209,9 +175,9 @@ static void handle_rx_flowctrl(const boost::uint32_t sid, zero_copy_if::sptr xpo
 
     //load header
     if (big_endian)
-        x300_if_hdr_pack_be(pkt, packet_info);
+        vrt::chdr::if_hdr_pack_be(pkt, packet_info);
     else
-        x300_if_hdr_pack_le(pkt, packet_info);
+        vrt::chdr::if_hdr_pack_le(pkt, packet_info);
 
     //load payload
     pkt[packet_info.num_header_words32+0] = uhd::htonx<boost::uint32_t>(0);
@@ -244,6 +210,12 @@ struct x300_tx_fc_guts_t
 
 #define X300_ASYNC_EVENT_CODE_FLOW_CTRL 0
 
+/*!
+ * If the return value of this function is F, the last tx'd packet
+ * has index N and the last ack'd packet has index M, the amount of
+ * FC credit we have is C = F + M - N (i.e. we can send C more packets
+ * before getting another ack).
+ */
 static size_t get_tx_flow_control_window(size_t frame_size, const device_addr_t& tx_args)
 {
     double hw_buff_size = tx_args.cast<double>("send_buff_size", X300_TX_HW_BUFF_SIZE);
@@ -270,12 +242,12 @@ static void handle_tx_async_msgs(boost::shared_ptr<x300_tx_fc_guts_t> guts, zero
     {
         if (big_endian)
         {
-            x300_if_hdr_unpack_be(packet_buff, if_packet_info);
+            vrt::chdr::if_hdr_unpack_be(packet_buff, if_packet_info);
             endian_conv = uhd::ntohx;
         }
         else
         {
-            x300_if_hdr_unpack_le(packet_buff, if_packet_info);
+            vrt::chdr::if_hdr_unpack_le(packet_buff, if_packet_info);
             endian_conv = uhd::wtohx;
         }
     }
@@ -318,9 +290,12 @@ static managed_send_buffer::sptr get_tx_buff_with_flowctrl(
 ){
     while (true)
     {
+        // delta is the amount of FC credit we've used up
         const size_t delta = (guts->last_seq_out & 0xfff) - (guts->last_seq_ack & 0xfff);
-        if ((delta & 0xfff) <= fc_pkt_window) break;
+        // If we want to send another packet, we must have FC credit left
+        if ((delta & 0xfff) < fc_pkt_window) break;
 
+        // If credit is all used up, we check seq_queue for more.
         const bool ok = guts->seq_queue.pop_with_timed_wait(guts->last_seq_ack, timeout);
         if (not ok) return managed_send_buffer::sptr(); //timeout waiting for flow control
     }
@@ -421,10 +396,10 @@ rx_streamer::sptr x300_impl::get_rx_stream(const uhd::stream_args_t &args_)
         //init some streamer stuff
         std::string conv_endianness;
         if (mb.if_pkt_is_big_endian) {
-            my_streamer->set_vrt_unpacker(&x300_if_hdr_unpack_be);
+            my_streamer->set_vrt_unpacker(&vrt::chdr::if_hdr_unpack_be);
             conv_endianness = "be";
         } else {
-            my_streamer->set_vrt_unpacker(&x300_if_hdr_unpack_le);
+            my_streamer->set_vrt_unpacker(&vrt::chdr::if_hdr_unpack_le);
             conv_endianness = "le";
         }
 
@@ -585,10 +560,10 @@ tx_streamer::sptr x300_impl::get_tx_stream(const uhd::stream_args_t &args_)
 
         std::string conv_endianness;
         if (mb.if_pkt_is_big_endian) {
-            my_streamer->set_vrt_packer(&x300_if_hdr_pack_be);
+            my_streamer->set_vrt_packer(&vrt::chdr::if_hdr_pack_be);
             conv_endianness = "be";
         } else {
-            my_streamer->set_vrt_packer(&x300_if_hdr_pack_le);
+            my_streamer->set_vrt_packer(&vrt::chdr::if_hdr_pack_le);
             conv_endianness = "le";
         }
 

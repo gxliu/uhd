@@ -7,13 +7,13 @@
 - Hardware Capabilities:
 	  Integrated RF frontend (70 MHz - 6 GHz)
 	- External PPS reference input
-	- External 10 MHz reference input
 	- Configurable clock rate
 	- Internal GPIO connector with UHD API control
 	- 2 USB 2.0 Host ports
-	- Internal GPSDO
+	- Internal GPS
 	- Soundcard mono input / stereo output
 	- USB UART
+	- Internal IMU
 	- Zynq-7020 FPGA
 - FPGA Capabilities:
         - 2 RX DDC chains in FPGA
@@ -132,7 +132,7 @@ which should return 'arm-oe-linux-gnueabi'.
 -# Setup your environment as described in \ref e3x0_sdk_usage
 -# Type the following in the build directory (assuming a build in host/build):
 
-        $ cmake -DCMAKE_TOOLCHAIN_FILE=<youruhdsrc>/host/cmake/Toolchains/oe-sdk_cross.cmake -DENABLE_E300=On ..
+        $ cmake -DCMAKE_TOOLCHAIN_FILE=<youruhdsrc>/host/cmake/Toolchains/oe-sdk_cross.cmake -DCMAKE_INSTALL_PREFIX=/usr -DENABLE_E300=ON ..
         $ make
 
 \subsubsection e3x0_sdk_usage_gnuradio Building GNU Radio
@@ -143,7 +143,7 @@ which should return 'arm-oe-linux-gnueabi'.
 
 \code{.sh}
 $ mkdir build-arm
-$ cmake -Wno-dev -DCMAKE_TOOLCHAIN_FILE=../cmake/Toolchains/oe-sdk_cross.cmake \-DCMAKE_INSTALL_PREFIX=/usr -DENABLE_GR_VOCODER=OFF -DGR_ENABLE_ATSC=OFF \
+$ cmake -Wno-dev -DCMAKE_TOOLCHAIN_FILE=../cmake/Toolchains/oe-sdk_cross.cmake \-DCMAKE_INSTALL_PREFIX=/usr -DENABLE_GR_VOCODER=OFF -DENABLE_GR_ATSC=OFF \
 -DENABLE_GR_DTV=OFF -DENABLE_DOXYGEN=OFF ../
 \endcode
 
@@ -274,8 +274,20 @@ You may need to change the USRP's IP address for several reasons:
 - **USB**: USB 2.0 Port
 - **SERIAL**: Micro USB connection for serial uart console
 
+\subsection e3x0_hw_sync Clock and Time Synchronization
+Unlike most USRP devices, the E310 does not have independent reference clock and time source inputs.
+It is possible, however, to discipline the internal reference clock using an external time (PPS) source
+connected to the SYNC input pin. The E310 FPGA has a subsystem that can use the PPS signal from the
+SYNC pin or the internal GPS to align edges of the reference clock to edges of a shared PPS signal. 
+This alignment happens automatically when the time source in UHD is set to "gpsdo" or "external". 
+Please note that because the SYNC input can only accept a PPS signal, the only supported value for 
+the reference clock source is "internal".
+
+
 \subsection e3x0_hw_pps PPS - Pulse Per Second
-Using a PPS signal for timestamp synchronization requires a square wave signal with the following a 5Vpp amplitude.
+Using a PPS signal for timestamp synchronization requires a LVCMOS or a 5V logic input signal.
+An external PPS can be used to discipline the internal reference clock. This feature is automatically 
+enabled with the time source is set to "external".
 
 To test the PPS input, you can use the following tool from the UHD examples:
 
@@ -284,13 +296,49 @@ To test the PPS input, you can use the following tool from the UHD examples:
     cd <install-path>/lib/uhd/examples
     ./test_pps_input --args=\<args\>
 
-\subsection e3x0_hw_gpsdo Internal GPSDO
+\subsection e3x0_hw_gps Internal GPS
 
-Your USRP-E Series device comes with an internal GPSDO.
+Your USRP-E Series device comes with an internal GPS.
 In order to get a lock on a satellite an external GPS antenna is required.
+The PPS from the internal GPS can be used to discipline the internal reference clock. This feature is automatically 
+enabled with the time source is set to "gpsdo".
 
 The device provides a 3.3V supply voltage to an external antenna connected to the *GPS* port
 of your device. Note that this supply voltage is turned off in order to safe power upon destruction of the software object.
+
+\subsection e3x0_hw_imu Inertial Measurement Unit (IMU)
+
+Your USRP-E Series device has an onboard IMU that provides
+9 axis (Gyro, Accelerometer and compass) functionality.
+
+The USRP-E Series images ship with several example applications based on
+<a href="https://github.com/richards-tech/RTIMULib">RTIMULib</a> that allow the user
+to explore the basic functionality of the IMU as well as to calibrate it.
+
+To test the accelerometer, run:
+
+    $ RTIMULibDrive
+
+This will print the current acclerometer values on the console.
+
+To launch the IMU calibration procedure, run:
+
+    $ RTIMULibCal
+
+and follow the onscreen instructions. Please note that magnetometer calibration is important to obtain
+sensible results if the IMU is to be used in sensor fusion applications.
+
+Using X11 forwarding over SSH (see \ref e3x0_faq) a complete sensor fusion application can be run over SSH
+from a host computer by typing:
+
+    $ RTIMULibDemo
+
+This should open a graphical window on the host computer that displays the various outputs of the IMU,
+as well as quaternion measurements based on different sensor fusion algorithms.
+
+\image html e3x0_imu_demo.png "RTIMULibDemo"
+
+For more advanced IMU based applications please refer to the <a href="https://github.com/richards-tech/RTIMULib">RTIMULib repository</a> as well as the datasheets.
 
 \subsection e3x0_hw_gpio Internal GPIO
 
@@ -371,6 +419,95 @@ usrp->get_rx_sensor("lo-locked");
 usrp->get_tx_sensor("lo-locked");
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+\subsubsection e3x0_dboard_e310_band_select Frontend Filter and Antenna Switches
+
+The transmit and receive filter banks uses switches to select between the available filters. These paths are
+also dependent on the antenna switch settings. Incorrectly setting the switches generally results
+in attenuated input / output power. Receive filters are band pass (series high & low pass filters), 
+transmit filters are low pass.
+
+Source code related to controlling the filter band and antenna switches resides in e300_impl.c. Specifically, refer to methods 
+`e300_impl::_update_bandsel`, `e300_impl::_update_atrs`, `e300_impl::_update_gpio`, and `e300_impl::_update_enables`. Generally, these 
+methods set the switches depending on the state of transmit and receive streams.
+
+The following sections provide switch setting tables for antenna and filter selection for frontends A & B receive and transmit paths.
+For futher details refer to the schematics. 
+
+\subsubsection e3x0_dboard_e310_frontend_a_switches Frontend Side A Filter and Antenna Switches
+
+_Note: X = don't care, T = If full duplex, set bits according to transmit table, otherwise don't care.
+Filter range A – B will be selected if A <= freq < B._
+
+__Receive__
+RX Port | RX Filter (MHz) | VCTXRX2_V1,V2 | VCRX2_V1,V2 | RX2_BANDSEL[2:0] | RX2B_BANDSEL[1:0] | RX2C_BANDSEL[1:0]
+:-----: | :-------------: | :-----------: | :---------: | :--------------: | :---------------: | :---------------:
+TRX-A   | < 450           | 01            | 10          | 101              | XX                | 01               
+TRX-A   | 450 – 700       | 01            | 10          | 011              | XX                | 11               
+TRX-A   | 700 – 1200      | 01            | 10          | 001              | XX                | 10               
+TRX-A   | 1200 – 1800     | 01            | 10          | 000              | 01                | XX               
+TRX-A   | 1800 – 2350     | 01            | 10          | 010              | 11                | XX               
+TRX-A   | 2350 – 2600     | 01            | 10          | 100              | 10                | XX               
+TRX-A   | 2600 – 6000     | 01            | 01          | XXX              | XX                | XX               
+RX2-A   | 70  – 450       | TT            | 01          | 101              | XX                | 01               
+RX2-A   | 450 – 700       | TT            | 01          | 011              | XX                | 11               
+RX2-A   | 700 – 1200      | TT            | 01          | 001              | XX                | 10               
+RX2-A   | 1200 – 1800     | TT            | 01          | 000              | 01                | XX               
+RX2-A   | 1800 – 2350     | TT            | 01          | 010              | 11                | XX               
+RX2-A   | 2350 – 2600     | TT            | 01          | 100              | 10                | XX               
+RX2-A   | >= 2600         | TT            | 10          | XXX              | XX                | XX               
+
+__Transmit__
+TX Port | TX Filter (MHz) | VCTXRX2_V1,V2 | TX_ENABLE2A,2B | TX_BANDSEL[2:0]
+:-----: | :-------------: | :-----------: | :------------: | :-------------:
+TRX-A   | < 117.7         | 10            | 01             | 111            
+TRX-A   | 117.7 – 178.2   | 10            | 01             | 110            
+TRX-A   | 178.2 – 284.3   | 10            | 01             | 101            
+TRX-A   | 284.3 – 453.7   | 10            | 01             | 100            
+TRX-A   | 453.7 – 723.8   | 10            | 01             | 011            
+TRX-A   | 723.8 – 1154.9  | 10            | 01             | 010            
+TRX-A   | 1154.9 – 1842.6 | 10            | 01             | 001            
+TRX-A   | 1842.6 – 2940.0 | 10            | 01             | 000            
+TRX-A   | >= 2940.0       | 11            | 10             | XXX            
+_Note: Although the transmit filters are low pass, this table describes UHD's tuning range for selecting each filter path.
+The table also includes the required transmit enable state._
+
+\subsubsection e3x0_dboard_e310_frontend_b_switches Frontend Side B Filter and Antenna Switches
+
+_Note: X = don't care, T = If full duplex, set bits according to transmit table, otherwise don't care.
+Filter range A – B will be selected if A <= freq < B._
+
+__Receive__
+RX Port | RX Filter (MHz) | VCTXRX1_V1,V2 | VCRX1_V1,V2 | RX1_BANDSEL[2:0] | RX1B_BANDSEL[1:0] | RX1C_BANDSEL[1:0]
+:-----: | :-------------: | :-----------: | :---------: | :--------------: | :---------------: | :---------------:
+TRX-B   | < 450           | 10            | 01          | 100              | XX                | 10               
+TRX-B   | 450 – 700       | 10            | 01          | 010              | XX                | 11               
+TRX-B   | 700 – 1200      | 10            | 01          | 000              | XX                | 01               
+TRX-B   | 1200 – 1800     | 10            | 01          | 001              | 10                | XX               
+TRX-B   | 1800 – 2350     | 10            | 01          | 011              | 11                | XX               
+TRX-B   | 2350 – 2600     | 10            | 01          | 101              | 01                | XX               
+TRX-B   | 2600 – 6000     | 10            | 10          | XXX              | XX                | XX               
+RX2-B   | 70  – 450       | TT            | 10          | 100              | XX                | 10               
+RX2-B   | 450 – 700       | TT            | 10          | 010              | XX                | 11               
+RX2-B   | 700 – 1200      | TT            | 10          | 000              | XX                | 01               
+RX2-B   | 1200 – 1800     | TT            | 10          | 001              | 10                | XX               
+RX2-B   | 1800 – 2350     | TT            | 10          | 011              | 11                | XX               
+RX2-B   | 2350 – 2600     | TT            | 10          | 101              | 01                | XX               
+RX2-B   | >= 2600         | TT            | 01          | XXX              | XX                | XX               
+
+__Transmit__
+TX Port | TX Filter (MHz) | VCTXRX1_V1,V2 | TX_ENABLE1A,1B | TX1_BANDSEL[2:0]
+:-----: | :-------------: | :-----------: | :------------: | :--------------:
+TRX-B   | < 117.7         | 00            | 01             | 111             
+TRX-B   | 117.7 – 178.2   | 00            | 01             | 110             
+TRX-B   | 178.2 – 284.3   | 00            | 01             | 101             
+TRX-B   | 284.3 – 453.7   | 00            | 01             | 100             
+TRX-B   | 453.7 – 723.8   | 00            | 01             | 011             
+TRX-B   | 723.8 – 1154.9  | 00            | 01             | 010             
+TRX-B   | 1154.9 – 1842.6 | 00            | 01             | 001             
+TRX-B   | 1842.6 – 2940.0 | 00            | 01             | 000             
+TRX-B   | >= 2940.0       | 11            | 10             | XXX             
+_Note: Although the transmit filters are low pass, the following table describes UHD's tuning range for selecting each filter path.
+The table also includes the required transmit enable states._
 
 \section e3x0_misc Miscellaneous
 
@@ -397,7 +534,7 @@ they can be queried through the API.
 
 - **fe_locked** - rx / tx frontend PLL locked
 - **temp** - processor temperature value
-- **gps_time** and **gps_locked** sensors are added when the GPSDO is found
+- **gps_time** and **gps_locked** sensors are added when the GPS is found
 
 \subsection e3x0_network_mode Network Mode
 
@@ -486,11 +623,11 @@ You can use this to make sure the network connection is correctly set up, e.g.
 by pinging the USRP and making sure the LEDs start to blink.
 
 
-\subsection e3x0 Frequently Asked Questions
+\subsection e3x0_faq Frequently Asked Questions
 
  - Communication
-  -# How do I enable X forwarding so I can run X apps on the e3x0?\n
-     In the file `/etc/ssh/sshd_config`, uncomment the line `#X11Forwarding no`
+  -# How do I enable X forwarding so I can run X apps on the E3x0?<br>
+     In the file `/etc/ssh/sshd_config`, uncomment the line \#`X11Forwarding no`
      and change "no" to "yes".
 
 \section e3x0_apps Applications

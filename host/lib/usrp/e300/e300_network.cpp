@@ -224,6 +224,11 @@ static void e300_codec_ctrl_tunnel(
                 _codec_ctrl->data_port_loopback(
                     uhd::ntohx<boost::uint32_t>(in->bits) & 1);
                 break;
+            case codec_xact_t::ACTION_GET_RSSI:
+                out->rssi = _codec_ctrl->get_rssi(which_str).to_real();
+            case codec_xact_t::ACTION_GET_TEMPERATURE:
+                out->temp = _codec_ctrl->get_temperature().to_real();
+                break;
             default:
                 UHD_MSG(status) << "Got unknown request?!" << std::endl;
                 //Zero out actions to fail this request on client
@@ -329,6 +334,9 @@ static void e300_sensor_tunnel(
             } else if (uhd::ntohx(in->which) == GPS_LOCK) {
                 in->value = uhd::htonx<boost::uint32_t>(
                     sensor_manager->get_gps_lock().to_bool() ? 1 : 0);
+            } else if (uhd::ntohx(in->which) == REF_LOCK) {
+                in->value = uhd::htonx<boost::uint32_t>(
+                    sensor_manager->get_ref_lock().to_bool() ? 1 : 0);
             } else if (uhd::ntohx(in->which) == GPS_TIME) {
                 in->value = uhd::htonx<boost::uint32_t>(
                     sensor_manager->get_gps_time().to_int());
@@ -619,7 +627,7 @@ network_server_impl::network_server_impl(const uhd::device_addr_t &device_addr)
     // This is horrible ... why do I have to sleep here?
     boost::this_thread::sleep(boost::posix_time::milliseconds(100));
     _sensor_manager = e300_sensor_manager::make_local(
-        gps::ublox::ubx::control::make("/dev/ttyPS1", 9600));
+        gps::ublox::ubx::control::make("/dev/ttyPS1", 9600), _global_regs);
 }
 
 }}} // namespace

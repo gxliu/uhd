@@ -1,5 +1,5 @@
 #
-# Copyright 2010-2014 Ettus Research LLC
+# Copyright 2010-2015 Ettus Research LLC
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -99,6 +99,10 @@ LIBUHD_APPEND_SOURCES(
 # Add DLL resource file to Windows build
 ########################################################################
 IF(MSVC)
+    SET(RC_TRIMMED_VERSION_PATCH ${TRIMMED_VERSION_PATCH})
+    IF(UHD_VERSION_DEVEL)
+        SET(RC_TRIMMED_VERSION_PATCH "999")
+    ENDIF(UHD_VERSION_DEVEL)
     CONFIGURE_FILE(
         ${CMAKE_CURRENT_SOURCE_DIR}/uhd.rc.in
         ${CMAKE_CURRENT_BINARY_DIR}/uhd.rc
@@ -128,3 +132,14 @@ IF(NOT UHDHOST_PKG) #Syntax makes it unusable by UHD_INSTALL
         RUNTIME DESTINATION ${RUNTIME_DIR} COMPONENT libraries # .dll file
     )
 ENDIF(NOT UHDHOST_PKG)
+
+#######################################################
+# Setup libuhd library (static)
+#######################################################
+IF(ENABLE_STATIC_LIBS)
+    ADD_LIBRARY(uhd_static STATIC ${libuhd_sources})
+    SET_TARGET_PROPERTIES(uhd_static PROPERTIES OUTPUT_NAME uhd)
+    INSTALL(TARGETS uhd_static
+        ARCHIVE DESTINATION lib${LIB_SUFFIX} # .lib or .a file
+    )
+ENDIF(ENABLE_STATIC_LIBS)

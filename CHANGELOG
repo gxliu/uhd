@@ -1,6 +1,31 @@
 Change Log for Releases
 ==============================
 
+## 003.008.002
+* CMake: Introducing named versions for dev branches, enable static libs,
+* E300: Docs updates, compat number bump, VCTCXO updates,
+  more status bits for ref locking, fixed serial number length fix,
+  RSSI Sensor
+* B200: RSSI sensor
+* AD9361: Better handling of different interpolation rates in FIR,
+  fix for gain value truncation
+* UBX: Added drivers
+* Manual/Docs: Numerous updates, minimum compiler versions now specified,
+* Converters: Multiple fixes for sc12
+* Examples: Fixes to txrx_loopback_to_file
+* Minor UHD fixes
+
+## 003.008.001
+* B2x0: Fixed PLL settings, Fixed external ref selection, serialized
+  streamer setup (thread-safety)
+* X3x0: Fixed flow control issue, improved DAC ctrl + init logic,
+  Fixed I/Q alignment issue
+* Generation-3 devices: Fixed LED registers
+* UHD: Improved tuning logic for manual tunes
+* Tools: Multiple kitchen sink fixes, coloured output
+* Examples: Multiple bugfixes (multi-channel ops)
+* Docs/Manual: Multiple fixes, E310 panel images
+
 ## 003.008.000
 * Added E310 support
 * B200/B210: Moved AD9361 controls from firmware to host
